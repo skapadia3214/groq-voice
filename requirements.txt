@@ -1,0 +1,10 @@
+pyaudio
+groq
+elevenlabs
+openai
+langchain
+langchain-groq
+langchain-community
+numpy
+pydub
+python-dotenv

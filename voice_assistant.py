@@ -1,10 +1,12 @@
 import wave
-import os
+from time import time
+from typing import Optional
 import pyaudio
 import numpy as np
 from io import BytesIO
 from elevenlabs.client import ElevenLabs
 from elevenlabs import VoiceSettings
+from agent import Agent
 from pydub import AudioSegment
 from openai import OpenAI
 from groq import Groq
@@ -19,11 +21,18 @@ from config import (
     SILENCE_THRESHOLD,
     SILENCE_DURATION,
     PRE_SPEECH_BUFFER_DURATION,
+    Voices
 )
 
+
 class VoiceAssistant:
-    def __init__(self):
+    def __init__(
+        self,
+        voice_id: Optional[str] = Voices.CJ_MURPH,
+    ):
         self.audio = pyaudio.PyAudio()
+        self.agent = Agent()
+        self.voice_id = voice_id
         self.xi_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
         self.oai_client = OpenAI(api_key=OPENAI_API_KEY)
         self.g_client = Groq(api_key=GROQ_API_KEY)
@@ -130,14 +139,17 @@ class VoiceAssistant:
         Returns:
             str: The transcribed text.
         """
+        start = time()
         audio_bytes.seek(0)
         transcription = self.oai_client.audio.transcriptions.create(
             file=("temp.wav", audio_bytes.read()),
             model="whisper-1",
         )
+        end = time()
+        print(transcription)
         return transcription.text
 
-    def text_to_speech(self, text):
+    def text_to_speech(self, text, voice_id: Optional[str] = None):
         """
         Convert text to speech and return an audio stream.
 
@@ -147,8 +159,9 @@ class VoiceAssistant:
         Returns:
             BytesIO: The audio stream.
         """
+        voice_id = voice_id or self.voice_id
         response = self.xi_client.text_to_speech.convert(
-            voice_id="pNInz6obpgDQGcFmaJgB",  # Adam pre-made voice
+            voice_id=voice_id,
             optimize_streaming_latency="0",
             output_format="mp3_22050_32",
             text=text,
@@ -204,16 +217,37 @@ class VoiceAssistant:
         finally:
             stream.stop_stream()
             stream.close()
+    
+    def chat(self, query: str) -> str:
+        """
+        Chat with an LLM/Agent/Anything you want.
+        Override this method if you want to proccess responses differently.
+
+        Args:
+            query (str): Convert speech to text from microphone input
+        
+        Returns:
+            str: String output to be spoken
+        """
+        start = time()
+        response = self.agent.chat(query)
+        end = time()
+        print(f"Time taken for Groq Llama response: {end - start}")
+        return response
 
     def run(self):
         """
         Main function to run the voice assistant.
         """
         while True:
+            # STT
             audio_bytes = self.listen_for_speech()
             text = self.speech_to_text_g(audio_bytes)
-            print("Transcription:", text)
-            response_text = "You said: " + text
+
+            # Agent
+            response_text = self.chat(text)
+            
+            # TTS
             audio_stream = self.text_to_speech(response_text)
             audio_iterator = self.audio_stream_to_iterator(audio_stream)
             self.stream_audio(audio_iterator)

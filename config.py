@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 import pyaudio
+from enum import Enum
 
 load_dotenv()
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
@@ -16,6 +17,13 @@ if not OPENAI_API_KEY:
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY environment variable not set")
 
+
+class Voices(Enum):
+    APHRODITE = "fQuiOHUGZu5WDKWT80Wz"
+    ADAM = "pNInz6obpgDQGcFmaJgB" 
+    CJ_MURPH = "876MHA6EtWKaHTEGzjy5"
+
+VOICE_ID = "fQuiOHUGZu5WDKWT80Wz"
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 44100

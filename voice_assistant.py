@@ -141,9 +141,9 @@ class VoiceAssistant:
         """
         start = time()
         audio_bytes.seek(0)
-        transcription = self.oai_client.audio.transcriptions.create(
+        transcription = self.g_client.audio.transcriptions.create(
             file=("temp.wav", audio_bytes.read()),
-            model="whisper-1",
+            model="whisper-large-v3",
         )
         end = time()
         print(transcription)
@@ -232,7 +232,7 @@ class VoiceAssistant:
         start = time()
         response = self.agent.chat(query)
         end = time()
-        print(f"Time taken for Groq Llama response: {end - start}")
+        print(f"Response: {response}\nResponse Time: {end - start}")
         return response
 
     def run(self):

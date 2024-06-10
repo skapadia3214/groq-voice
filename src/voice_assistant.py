@@ -1,12 +1,12 @@
 import wave
-from time import time
-from typing import Optional
+from time import time, sleep
+from typing import Optional, Generator, Any
 import pyaudio
 import numpy as np
 from io import BytesIO
 from elevenlabs.client import ElevenLabs
 from elevenlabs import VoiceSettings
-from agent import Agent
+from .agent import Agent
 from pydub import AudioSegment
 from openai import OpenAI
 from groq import Groq
@@ -28,7 +28,8 @@ from config import (
 class VoiceAssistant:
     def __init__(
         self,
-        voice_id: Optional[str] = Voices.CJ_MURPH,
+        voice_id: Optional[str] = Voices.ADAM,
+        **kwargs,
     ):
         self.audio = pyaudio.PyAudio()
         self.agent = Agent()
@@ -36,8 +37,11 @@ class VoiceAssistant:
         self.xi_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
         self.oai_client = OpenAI(api_key=OPENAI_API_KEY)
         self.g_client = Groq(api_key=GROQ_API_KEY)
+        self.silence_threshold = kwargs.get("silence_threshold", SILENCE_THRESHOLD)
+        self.silence_duration = kwargs.get("silence_duration", SILENCE_DURATION)
+        self.pre_speech_buffer_duration = kwargs.get("pre_speech_buffer_duration", PRE_SPEECH_BUFFER_DURATION)
 
-    def is_silence(self, data):
+    def is_silence(self, data, silence_threshold: Optional[float | int] = None):
         """
         Detect if the provided audio data is silence.
 
@@ -47,9 +51,13 @@ class VoiceAssistant:
         Returns:
             bool: True if the data is considered silence, False otherwise.
         """
+        if not silence_threshold:
+            silence_threshold = self.silence_threshold
         audio_data = np.frombuffer(data, dtype=np.int16)
-        rms = np.sqrt(np.mean(audio_data**2))
-        return rms < SILENCE_THRESHOLD
+        mean = np.mean(audio_data**2)
+        rms = np.sqrt((mean if mean >= 0 else 0))
+        print(f"{rms=}")
+        return rms < silence_threshold
 
     def listen_for_speech(self):
         """
@@ -112,9 +120,9 @@ class VoiceAssistant:
 
         return audio_bytes
 
-    def speech_to_text(self, audio_bytes):
+    def speech_to_text(self, audio_bytes: BytesIO):
         """
-        Transcribe speech to text using OpenAI.
+        Transcribe speech to text using Groq.
 
         Args:
             audio_bytes (BytesIO): The audio bytes to transcribe.
@@ -122,16 +130,30 @@ class VoiceAssistant:
         Returns:
             str: The transcribed text.
         """
+        # Convert BytesIO to a valid WAV file
         audio_bytes.seek(0)
-        transcription = self.oai_client.audio.transcriptions.create(
-            file=("temp.wav", audio_bytes.read()),
-            model="whisper-1",
+        wav_bytes = BytesIO()
+        with wave.open(wav_bytes, 'wb') as wav_file:
+            wav_file.setnchannels(CHANNELS)
+            wav_file.setsampwidth(pyaudio.get_sample_size(FORMAT))
+            wav_file.setframerate(RATE)
+            wav_file.writeframes(audio_bytes.read())
+
+        wav_bytes.seek(0)
+
+        # Transcribe the WAV file
+        transcription = self.g_client.audio.transcriptions.create(
+            file=("temp.wav", wav_bytes.read()),
+            model="whisper-large-v3",
+            response_format='verbose_json',
+            temperature=0.0
         )
+        print(transcription)
         return transcription.text
 
-    def speech_to_text_g(self, audio_bytes):
+    def speech_to_text_o(self, audio_bytes: BytesIO):
         """
-        Transcribe speech to text using OpenAI.
+        Transcribe speech to text using Groq.
 
         Args:
             audio_bytes (BytesIO): The audio bytes to transcribe.
@@ -139,11 +161,22 @@ class VoiceAssistant:
         Returns:
             str: The transcribed text.
         """
+        # Convert BytesIO to a valid WAV file
+        audio_bytes.seek(0)
+        wav_bytes = BytesIO()
+        with wave.open(wav_bytes, 'wb') as wav_file:
+            wav_file.setnchannels(CHANNELS)
+            wav_file.setsampwidth(pyaudio.get_sample_size(FORMAT))
+            wav_file.setframerate(RATE)
+            wav_file.writeframes(audio_bytes.read())
+
+        wav_bytes.seek(0)
+
         start = time()
         audio_bytes.seek(0)
-        transcription = self.g_client.audio.transcriptions.create(
-            file=("temp.wav", audio_bytes.read()),
-            model="whisper-large-v3",
+        transcription = self.oai_client.audio.transcriptions.create(
+            file=("temp.wav", wav_bytes.read()),
+            model="whisper-1",
         )
         end = time()
         print(transcription)
@@ -177,7 +210,7 @@ class VoiceAssistant:
         audio_stream.seek(0)
         return audio_stream
 
-    def audio_stream_to_iterator(self, audio_stream, format='mp3'):
+    def audio_stream_to_iterator(self, audio_stream, format='mp3') -> Generator[Any, Any, None]:
         """
         Convert audio stream to an iterator of raw PCM audio bytes.
 
@@ -217,8 +250,12 @@ class VoiceAssistant:
         finally:
             stream.stop_stream()
             stream.close()
-    
-    def chat(self, query: str) -> str:
+
+    def chat(
+        self,
+        query: str,
+        **kwargs
+    ) -> str:
         """
         Chat with an LLM/Agent/Anything you want.
         Override this method if you want to proccess responses differently.
@@ -230,7 +267,7 @@ class VoiceAssistant:
             str: String output to be spoken
         """
         start = time()
-        response = self.agent.chat(query)
+        response = self.agent.chat(query, **kwargs)
         end = time()
         print(f"Response: {response}\nResponse Time: {end - start}")
         return response
@@ -242,7 +279,7 @@ class VoiceAssistant:
         while True:
             # STT
             audio_bytes = self.listen_for_speech()
-            text = self.speech_to_text_g(audio_bytes)
+            text = self.speech_to_text(audio_bytes)
 
             # Agent
             response_text = self.chat(text)

@@ -8,7 +8,7 @@ from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, SystemMes
 from langchain_core.output_parsers import StrOutputParser
 from typing import Generator, Any, Dict
 
-LLM = ChatGroq(model="llama3-70b-8192", temperature=0.2)
+LLM = ChatGroq(model="llama3-70b-8192", temperature=0.1)
 
 SYSTEM_PROMPT = """\
 You are a personal assistant that is helpful. \
@@ -54,10 +54,11 @@ class Agent:
 
         self.chat_memory.save_context({'input': llm_input['input']}, {'output': response})
     
-    def chat(self, query: str, streaming: bool=False):
+    def chat(self, query: str, streaming: bool=False, **kwargs):
         llm_input = {
             'input': query,
-            'chat_history': self.chat_memory.load_memory_variables({})[self.memory_key]
+            'chat_history': self.chat_memory.load_memory_variables({})[self.memory_key],
+            **kwargs
         }
 
         if streaming:
@@ -71,7 +72,7 @@ if __name__ == "__main__":
 
     while True:
         query = input("Chat: ")
-        print("Response:\n")
+        print("Response:")
         for token in agent.chat(query, streaming=True):
             print(token, end='', flush=True)
         print("\n")

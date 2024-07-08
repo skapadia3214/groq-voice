@@ -23,11 +23,12 @@ class Voices(Enum):
     ADAM = "pNInz6obpgDQGcFmaJgB" 
     CJ_MURPH = "876MHA6EtWKaHTEGzjy5"
 
-VOICE_ID = "fQuiOHUGZu5WDKWT80Wz"
+VOICE_ID = Voices.ADAM
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
-RATE = 44100
+RATE = 16000
 CHUNK = 1024
-SILENCE_THRESHOLD = 200  # Adjust this threshold as needed
+SILENCE_THRESHOLD = 50  # Adjust this threshold as needed
 SILENCE_DURATION = 2  # Duration of silence to stop recording in seconds
 PRE_SPEECH_BUFFER_DURATION = 0.5  # 500ms of audio to keep before speech detection
+NO_SPEECH_PROB = 1e-3

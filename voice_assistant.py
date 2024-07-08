@@ -5,7 +5,6 @@ import pyaudio
 import numpy as np
 from io import BytesIO
 from elevenlabs.client import ElevenLabs
-from elevenlabs import VoiceSettings
 from agent import Agent
 from pydub import AudioSegment
 from openai import OpenAI
@@ -21,6 +20,7 @@ from config import (
     SILENCE_THRESHOLD,
     SILENCE_DURATION,
     PRE_SPEECH_BUFFER_DURATION,
+    NO_SPEECH_PROB,
     Voices
 )
 
@@ -28,7 +28,7 @@ from config import (
 class VoiceAssistant:
     def __init__(
         self,
-        voice_id: Optional[str] = Voices.CJ_MURPH,
+        voice_id: Optional[str] = Voices.ADAM,
     ):
         self.audio = pyaudio.PyAudio()
         self.agent = Agent()
@@ -37,7 +37,28 @@ class VoiceAssistant:
         self.oai_client = OpenAI(api_key=OPENAI_API_KEY)
         self.g_client = Groq(api_key=GROQ_API_KEY)
 
-    def is_silence(self, data):
+    def save_audio_to_file(self, data: bytes, filename: str, channels: int=CHANNELS, rate: int=RATE):
+        wf = wave.open(filename, 'wb')
+        wf.setnchannels(channels)
+        wf.setsampwidth(self.audio.get_sample_size(FORMAT))
+        wf.setframerate(rate)
+        wf.writeframes(b''.join(data))
+        wf.close()
+
+    @staticmethod
+    def to_bytes_io(data: np.ndarray, rate=RATE) -> BytesIO:
+        data_audio_bytes = BytesIO()
+        wf = wave.open(data_audio_bytes, 'wb')
+        wf.setnchannels(1)
+        wf.setsampwidth(2)  # 16-bit audio
+        wf.setframerate(rate)
+        wf.writeframes(data.tobytes())
+        wf.close()
+        
+        data_audio_bytes.seek(0)
+        return data_audio_bytes
+
+    def is_silence(self, data: bytes):
         """
         Detect if the provided audio data is silence.
 
@@ -52,12 +73,6 @@ class VoiceAssistant:
         return rms < SILENCE_THRESHOLD
 
     def listen_for_speech(self):
-        """
-        Continuously detect silence and start recording when speech is detected.
-        
-        Returns:
-            BytesIO: The recorded audio bytes.
-        """
         stream = self.audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
         print("Listening for speech...")
         pre_speech_buffer = []
@@ -73,7 +88,8 @@ class VoiceAssistant:
                 print("Speech detected, start recording...")
                 stream.stop_stream()
                 stream.close()
-                return self.record_audio(pre_speech_buffer)
+                audio_data = self.record_audio(pre_speech_buffer)
+                return audio_data
 
     def record_audio(self, pre_speech_buffer):
         """
@@ -112,7 +128,7 @@ class VoiceAssistant:
 
         return audio_bytes
 
-    def speech_to_text(self, audio_bytes):
+    def speech_to_text(self, audio_bytes: BytesIO):
         """
         Transcribe speech to text using OpenAI.
 
@@ -129,25 +145,31 @@ class VoiceAssistant:
         )
         return transcription.text
 
-    def speech_to_text_g(self, audio_bytes):
+    def speech_to_text_g(self, audio_bytes: BytesIO, no_speech_prob: Optional[float] = None) -> str:
         """
-        Transcribe speech to text using OpenAI.
+        Transcribe speech to text using Groq.
 
         Args:
             audio_bytes (BytesIO): The audio bytes to transcribe.
+            no_speech_prob (Optional[float]): threshold to filter transcript segments. Defaults to class set value.
 
         Returns:
             str: The transcribed text.
         """
-        start = time()
+        if not no_speech_prob:
+            no_speech_prob = NO_SPEECH_PROB
         audio_bytes.seek(0)
+        start = time()
         transcription = self.g_client.audio.transcriptions.create(
             file=("temp.wav", audio_bytes.read()),
             model="whisper-large-v3",
+            response_format='verbose_json',
+            temperature=0.0
         )
         end = time()
-        print(transcription)
-        return transcription.text
+        print(f"{transcription}, TIME: {end - start}")
+        fil_transcription = ' '.join(map(lambda s: s['text'] if s['no_speech_prob'] < no_speech_prob else "", transcription.segments))
+        return fil_transcription
 
     def text_to_speech(self, text, voice_id: Optional[str] = None):
         """

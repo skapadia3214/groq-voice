@@ -8,3 +8,5 @@ langchain-community
 numpy
 pydub
 python-dotenv
+uvicorn[standard]
+fastapi

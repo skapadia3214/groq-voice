@@ -23,7 +23,7 @@ class Voices(Enum):
     ADAM = "pNInz6obpgDQGcFmaJgB" 
     CJ_MURPH = "876MHA6EtWKaHTEGzjy5"
 
-VOICE_ID = "fQuiOHUGZu5WDKWT80Wz"
+VOICE_ID = Voices.ADAM
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 44100

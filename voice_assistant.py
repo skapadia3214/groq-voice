@@ -28,7 +28,7 @@ from config import (
 class VoiceAssistant:
     def __init__(
         self,
-        voice_id: Optional[str] = Voices.CJ_MURPH,
+        voice_id: Optional[str] = Voices.ADAM,
     ):
         self.audio = pyaudio.PyAudio()
         self.agent = Agent()

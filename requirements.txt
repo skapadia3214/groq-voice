@@ -2,6 +2,7 @@ pyaudio
 groq
 elevenlabs
 openai
+requests
 langchain
 langchain-groq
 langchain-community

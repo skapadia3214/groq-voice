@@ -4,16 +4,12 @@ from typing import Optional
 import pyaudio
 import numpy as np
 from io import BytesIO
-from elevenlabs.client import ElevenLabs
-from elevenlabs import VoiceSettings
 from agent import Agent
 from pydub import AudioSegment
-from openai import OpenAI
-from groq import Groq
+from providers import build_tts_provider, build_stt_provider
 from config import (
-    ELEVENLABS_API_KEY,
-    GROQ_API_KEY,
-    OPENAI_API_KEY,
+    TTS_PROVIDER,
+    STT_PROVIDER,
     FORMAT,
     CHANNELS,
     RATE,
@@ -21,21 +17,23 @@ from config import (
     SILENCE_THRESHOLD,
     SILENCE_DURATION,
     PRE_SPEECH_BUFFER_DURATION,
-    Voices
 )
 
 
 class VoiceAssistant:
     def __init__(
         self,
-        voice_id: Optional[str] = Voices.ADAM,
+        voice_id: Optional[str] = None,
+        tts_provider: Optional[str] = None,
+        stt_provider: Optional[str] = None,
     ):
         self.audio = pyaudio.PyAudio()
         self.agent = Agent()
+        # Per-call voice override; None falls back to each provider's default.
         self.voice_id = voice_id
-        self.xi_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
-        self.oai_client = OpenAI(api_key=OPENAI_API_KEY)
-        self.g_client = Groq(api_key=GROQ_API_KEY)
+        # Provider selection (env/config default, overridable per-instance).
+        self.tts = build_tts_provider(tts_provider or TTS_PROVIDER)
+        self.stt = build_stt_provider(stt_provider or STT_PROVIDER)
 
     def is_silence(self, data):
         """
@@ -114,7 +112,8 @@ class VoiceAssistant:
 
     def speech_to_text(self, audio_bytes):
         """
-        Transcribe speech to text using OpenAI.
+        Transcribe speech to text using the configured STT provider
+        (Groq Whisper or 60db).
 
         Args:
             audio_bytes (BytesIO): The audio bytes to transcribe.
@@ -122,60 +121,25 @@ class VoiceAssistant:
         Returns:
             str: The transcribed text.
         """
-        audio_bytes.seek(0)
-        transcription = self.oai_client.audio.transcriptions.create(
-            file=("temp.wav", audio_bytes.read()),
-            model="whisper-1",
-        )
-        return transcription.text
+        return self.stt.transcribe(audio_bytes)
 
-    def speech_to_text_g(self, audio_bytes):
-        """
-        Transcribe speech to text using OpenAI.
-
-        Args:
-            audio_bytes (BytesIO): The audio bytes to transcribe.
-
-        Returns:
-            str: The transcribed text.
-        """
-        start = time()
-        audio_bytes.seek(0)
-        transcription = self.g_client.audio.transcriptions.create(
-            file=("temp.wav", audio_bytes.read()),
-            model="whisper-large-v3",
-        )
-        end = time()
-        print(transcription)
-        return transcription.text
+    # Backwards-compatible alias for the original Groq-specific method name.
+    speech_to_text_g = speech_to_text
 
     def text_to_speech(self, text, voice_id: Optional[str] = None):
         """
-        Convert text to speech and return an audio stream.
+        Convert text to speech and return an audio stream, using the
+        configured TTS provider (ElevenLabs or 60db).
 
         Args:
             text (str): The text to convert to speech.
+            voice_id (str, optional): Provider-specific voice id override.
 
         Returns:
-            BytesIO: The audio stream.
+            BytesIO: The audio stream (MP3).
         """
         voice_id = voice_id or self.voice_id
-        response = self.xi_client.text_to_speech.convert(
-            voice_id=voice_id,
-            optimize_streaming_latency="0",
-            output_format="mp3_22050_32",
-            text=text,
-            model_id="eleven_multilingual_v2",
-        )
-
-        audio_stream = BytesIO()
-
-        for chunk in response:
-            if chunk:
-                audio_stream.write(chunk)
-
-        audio_stream.seek(0)
-        return audio_stream
+        return self.tts.synthesize(text, voice_id=voice_id)
 
     def audio_stream_to_iterator(self, audio_stream, format='mp3'):
         """
@@ -242,14 +206,14 @@ class VoiceAssistant:
         while True:
             # STT
             audio_bytes = self.listen_for_speech()
-            text = self.speech_to_text_g(audio_bytes)
+            text = self.speech_to_text(audio_bytes)
 
             # Agent
             response_text = self.chat(text)
-            
+
             # TTS
             audio_stream = self.text_to_speech(response_text)
-            audio_iterator = self.audio_stream_to_iterator(audio_stream)
+            audio_iterator = self.audio_stream_to_iterator(audio_stream, format=self.tts.audio_format)
             self.stream_audio(audio_iterator)
 
 if __name__ == "__main__":
